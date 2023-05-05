@@ -1,0 +1,16 @@
+cabal-version:      3.0
+name:               hint-debug
+version:            0.1.0.0
+synopsis:
+homepage:
+license:            BSD-2-Clause
+author:             Martijn Bastiaan
+maintainer:         martijn@hmbastiaan.nl
+category:           Language
+
+executable hint-debug
+    main-is:          Main.hs
+    build-depends:    base >=4.15.0.0, ghc, ghc-paths
+    ghc-options:      -Wall
+    hs-source-dirs:   bin
+    default-language: GHC2021
