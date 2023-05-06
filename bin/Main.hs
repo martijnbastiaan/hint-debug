@@ -1,42 +1,60 @@
+{-# LANGUAGE CPP #-}
+{-# LANGUAGE OverloadedStrings #-}
+
 module Main where
 
-import GHC
-import GHC.Paths (libdir)
-import GHC.Unit (baseUnitId)
+import Control.Monad (filterM)
+import Control.Monad.IO.Class (liftIO, MonadIO)
+
+import qualified GHC as Ghc
+import qualified GHC.Paths as Ghc
+import qualified GHC.Unit.Types as Ghc
+import qualified GHC.Utils.Outputable as Ghc
+
+guessTarget :: Ghc.GhcMonad m => String -> m Ghc.Target
+guessTarget t = do
+#if MIN_VERSION_ghc(9,4,0)
+  Ghc.guessTarget t Nothing Nothing
+#else
+  Ghc.guessTarget t Nothing
+#endif
+
+print' :: (MonadIO m, Ghc.Outputable a) => m a -> m ()
+print' action = do
+  res <- action
+  liftIO $ putStrLn (Ghc.showPprUnsafe res)
+
+getLoadedModSummaries :: Ghc.GhcMonad m => m [Ghc.ModSummary]
+getLoadedModSummaries = do
+  modGraph <- Ghc.getModuleGraph
+  let modSummaries = Ghc.mgModSummaries modGraph
+  filterM (Ghc.isLoaded . Ghc.ms_mod_name) modSummaries
+
+#if MIN_VERSION_ghc(9,4,0)
+mkModule :: Ghc.GhcMonad m => String -> m (Ghc.GenModule Ghc.UnitId)
+mkModule nm = do
+    df <- Ghc.getSessionDynFlags
+    pure $ Ghc.mkModule (Ghc.homeUnitId_ df) (Ghc.mkModuleName nm)
+#else
+mkModule :: Ghc.GhcMonad m => String -> m Ghc.ModuleName
+mkModule nm =
+    pure $ Ghc.mkModuleName nm
+#endif
 
 main :: IO ()
 main = do
-  -- Don't pass in a home id. Results in:
-  --
-  --     hint-debug: panic! (the 'impossible' happened)
-  --       GHC version 9.4.4:
-  --             unsafeGetHomeUnit: No home unit
-  --
-  --     Please report this as a GHC bug:  https://www.haskell.org/ghc/reportabug
-  --
-  runGhc (Just libdir) $ do
-    target <- guessTarget "Test.hs" Nothing Nothing
-    setTargets [target]
-    !_ <- load LoadAllTargets
-    pure ()
+  Ghc.runGhc (Just Ghc.libdir) $ do
+    Ghc.setSessionDynFlags =<< Ghc.getSessionDynFlags
 
-  -- Home id ~ base. Results in:
-  --
-  --     hint-debug: panic! (the 'impossible' happened)
-  --       GHC version 9.4.4:
-  --             Unit unknown to the internal unit environment
-  --
-  --     unit (base)
-  --     pprInternalUnitMap
-  --       main (flags: main, Nothing) ->
-  --     Call stack:
-  --         CallStack (from HasCallStack):
-  --           callStackDoc, called at compiler/GHC/Utils/Panic.hs:182:37 in ghc:GHC.Utils.Panic
-  --           pprPanic, called at compiler/GHC/Unit/Env.hs:450:14 in ghc:GHC.Unit.Env
-  --
-  --     Please report this as a GHC bug:  https://www.haskell.org/ghc/reportabug
-  runGhc (Just libdir) $ do
-    target <- guessTarget "Test.hs" (Just baseUnitId) Nothing
-    setTargets [target]
-    !_ <- load LoadAllTargets
-    pure ()
+    liftIO $ putStrLn "Adding Foo as a target, and executing 'LoadAllTargets'.."
+    fooTarget <- guessTarget "Foo.hs"
+    Ghc.addTarget fooTarget
+    print' $ Ghc.load Ghc.LoadAllTargets
+    print' getLoadedModSummaries
+
+    liftIO $ putStrLn "Adding Bar as a target, and executing 'LoadUpTo m'.."
+    barTarget <- guessTarget "Bar.hs"
+    Ghc.addTarget barTarget
+    m <- mkModule "Bar"
+    print' $ Ghc.load (Ghc.LoadUpTo m)
+    print' getLoadedModSummaries
